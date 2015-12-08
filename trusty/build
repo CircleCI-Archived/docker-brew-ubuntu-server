@@ -1,0 +1,51 @@
+#!/bin/bash
+
+set -ex
+
+RELEASE=${1}
+
+function usage {
+  echo "$0 <ubuntu relesae version>"
+  exit 4
+}
+
+[ -n "$RELEASE" ] || ( usage ; exit 3; )
+
+echo ${RELEASE}
+
+# Docker archive file doesn't handle sparse files now
+# resulting into incomplete images, so we must
+# untar and then retar :(
+#
+# https://github.com/docker/docker/issues/4066
+function download_rootfs() {
+    [[ -n "$TMP_DIR" ]] || TMP_DIR=/tmp/files
+    sudo rm -rf ${TMP_DIR}
+    mkdir -p ${TMP_DIR}
+    pushd ${TMP_DIR}
+
+    curl -sSL -o trusty-server-cloudimg-amd64-root.tar.gz \
+	https://cloud-images.ubuntu.com/trusty/${RELEASE}/trusty-server-cloudimg-amd64-root.tar.gz
+
+    curl -sSL -o SHA256SUMS https://cloud-images.ubuntu.com/trusty/${RELEASE}/SHA256SUMS
+    if ! ( sha256sum --check <(grep trusty-server-cloudimg-amd64-root.tar.gz SHA256SUMS) )
+    then
+        echo Failed checksum
+        rm -rf trusty-server-cloudimg-amd64-root.tar.gz
+        exit 1
+    fi
+
+    mkdir rootfs
+    cd rootfs
+    sudo tar -xzf ../trusty-server-cloudimg-amd64-root.tar.gz
+    sudo tar -czf ../trusty-server-cloudimg-amd64-root-sanitised.tar.gz .
+    popd
+    cp ${TMP_DIR}/trusty-server-cloudimg-amd64-root-sanitised.tar.gz .
+}
+
+function build_docker() {
+    docker build -t circleci/ubuntu-server:trusty-${RELEASE} .
+}
+
+download_rootfs
+build_docker
